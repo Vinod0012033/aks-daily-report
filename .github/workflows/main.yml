@@ -2,14 +2,11 @@ name: Multi-Subscription AKS Health Check
 
 on:
 workflow_dispatch:
-schedule:
-- cron: "*/15 * * * *"
 
 jobs:
 aks-health:
 runs-on: ubuntu-latest
 
-```
 permissions:
   id-token: write
   contents: read
@@ -34,7 +31,7 @@ steps:
     client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
 ####################################################################
-# VERIFY LOGIN
+# VERIFY AZURE LOGIN
 ####################################################################
 - name: Verify Azure login
   run: az account show
@@ -73,7 +70,7 @@ steps:
   id: upload
   run: |
 
-    echo "Creating container if not exists"
+    echo "Creating container if not exists..."
 
     az storage container create \
       --name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
@@ -82,6 +79,8 @@ steps:
 
     TS=$(date +"%Y-%m-%d-%H-%M")
     REPORT_NAME="AKS-Health-Report-$TS.html"
+
+    echo "Uploading report $REPORT_NAME"
 
     az storage blob upload \
       --container-name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
@@ -116,7 +115,7 @@ steps:
     echo "sasurl=$FULL_URL" >> $GITHUB_OUTPUT
 
 ####################################################################
-# PRINT REPORT URL
+# DISPLAY REPORT URL
 ####################################################################
 - name: Show Report URL
   run: |
