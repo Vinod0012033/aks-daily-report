@@ -2,6 +2,9 @@ name: Multi-Subscription AKS Health Check
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '*/15 * * * *'
 
