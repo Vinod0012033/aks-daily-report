@@ -1,9 +1,9 @@
 name: Multi-Subscription AKS Health Check
 
 on:
-workflow_dispatch:        # Manual trigger
+workflow_dispatch:
 schedule:
-- cron: "*/15 * * * *"  # Runs every 15 minutes
+- cron: "*/15 * * * *"
 
 jobs:
 aks-health:
@@ -16,25 +16,114 @@ permissions:
 
 steps:
 
-  - name: Checkout repository
-    uses: actions/checkout@v4
+####################################################################
+# CHECKOUT REPOSITORY
+####################################################################
+- name: Checkout repository
+  uses: actions/checkout@v4
 
-  - name: Azure Login
-    uses: azure/login@v2
-    with:
-      client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-      subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+####################################################################
+# LOGIN TO AZURE
+####################################################################
+- name: Azure Login
+  uses: azure/login@v2
+  with:
+    client-id: ${{ secrets.AZURE_CLIENT_ID }}
+    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-  - name: Install tools
-    run: |
-      az aks install-cli
-      sudo apt-get update
-      sudo apt-get install -y jq
+####################################################################
+# VERIFY LOGIN
+####################################################################
+- name: Verify Azure login
+  run: az account show
 
-  - name: Run AKS health script
-    run: |
-      chmod +x scripts/aks_health_all_subs.sh
-      ./scripts/aks_health_all_subs.sh
+####################################################################
+# INSTALL REQUIRED TOOLS
+####################################################################
+- name: Install kubectl and jq
+  run: |
+    az aks install-cli
+    sudo apt-get update -y
+    sudo apt-get install -y jq
+
+####################################################################
+# RUN AKS HEALTH SCRIPT
+####################################################################
+- name: Run AKS Multi-Subscription Health Scan
+  run: |
+    chmod +x scripts/aks_health_all_subs.sh
+    ./scripts/aks_health_all_subs.sh
+
+####################################################################
+# VERIFY REPORT EXISTS
+####################################################################
+- name: Verify report file exists
+  run: |
+    if [ ! -f "reports/AKS Cluster Health.html" ]; then
+      echo "ERROR: Report file not found"
+      exit 1
+    fi
+
+####################################################################
+# UPLOAD REPORT TO AZURE STORAGE
+####################################################################
+- name: Upload HTML Report to Azure Storage
+  id: upload
+  run: |
+
+    echo "Creating container if not exists"
+
+    az storage container create \
+      --name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
+      --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
+      --account-key ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
+
+    TS=$(date +"%Y-%m-%d-%H-%M")
+    REPORT_NAME="AKS-Health-Report-$TS.html"
+
+    az storage blob upload \
+      --container-name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
+      --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
+      --account-key ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }} \
+      --file "reports/AKS Cluster Health.html" \
+      --name "$REPORT_NAME" \
+      --overwrite false
+
+    echo "report_name=$REPORT_NAME" >> $GITHUB_OUTPUT
+
+####################################################################
+# GENERATE SAS URL
+####################################################################
+- name: Generate SAS URL
+  id: sas
+  run: |
+
+    EXPIRY=$(date -u -d "3 days" '+%Y-%m-%dT%H:%MZ')
+
+    TOKEN=$(az storage blob generate-sas \
+      --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
+      --account-key ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }} \
+      --container-name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
+      --name "${{ steps.upload.outputs.report_name }}" \
+      --permissions r \
+      --expiry $EXPIRY \
+      -o tsv)
+
+    FULL_URL="https://${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}.blob.core.windows.net/${{ secrets.AZURE_STORAGE_CONTAINER }}/${{ steps.upload.outputs.report_name }}?$TOKEN"
+
+    echo "sasurl=$FULL_URL" >> $GITHUB_OUTPUT
+
+####################################################################
+# PRINT REPORT URL
+####################################################################
+- name: Show Report URL
+  run: |
+    echo "=========================================="
+    echo "AKS Health Report Uploaded Successfully"
+    echo "File: ${{ steps.upload.outputs.report_name }}"
+    echo "URL:"
+    echo "${{ steps.sas.outputs.sasurl }}"
+    echo "=========================================="
 ```
