@@ -2,26 +2,23 @@ name: Multi-Subscription AKS Health Check
 
 on:
 workflow_dispatch:
+schedule:
+- cron: "*/15 * * * *"
 
 jobs:
 aks-health:
 runs-on: ubuntu-latest
 
+```
 permissions:
-  id-token: write
   contents: read
+  id-token: write
 
 steps:
 
-####################################################################
-# CHECKOUT REPOSITORY
-####################################################################
 - name: Checkout repository
   uses: actions/checkout@v4
 
-####################################################################
-# LOGIN TO AZURE
-####################################################################
 - name: Azure Login
   uses: azure/login@v2
   with:
@@ -30,75 +27,45 @@ steps:
     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-####################################################################
-# VERIFY AZURE LOGIN
-####################################################################
 - name: Verify Azure login
   run: az account show
 
-####################################################################
-# INSTALL REQUIRED TOOLS
-####################################################################
-- name: Install kubectl and jq
+- name: Install tools
   run: |
     az aks install-cli
-    sudo apt-get update -y
+    sudo apt-get update
     sudo apt-get install -y jq
 
-####################################################################
-# RUN AKS HEALTH SCRIPT
-####################################################################
-- name: Run AKS Multi-Subscription Health Scan
+- name: Run AKS Health Script
   run: |
     chmod +x scripts/aks_health_all_subs.sh
     ./scripts/aks_health_all_subs.sh
 
-####################################################################
-# VERIFY REPORT EXISTS
-####################################################################
-- name: Verify report file exists
+- name: Check report exists
   run: |
     if [ ! -f "reports/AKS Cluster Health.html" ]; then
-      echo "ERROR: Report file not found"
+      echo "Report not found"
       exit 1
     fi
 
-####################################################################
-# UPLOAD REPORT TO AZURE STORAGE
-####################################################################
-- name: Upload HTML Report to Azure Storage
+- name: Upload report to Azure Storage
   id: upload
   run: |
-
-    echo "Creating container if not exists..."
-
-    az storage container create \
-      --name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
-      --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
-      --account-key ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
-
     TS=$(date +"%Y-%m-%d-%H-%M")
     REPORT_NAME="AKS-Health-Report-$TS.html"
 
-    echo "Uploading report $REPORT_NAME"
-
     az storage blob upload \
-      --container-name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
       --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }} \
       --account-key ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }} \
+      --container-name ${{ secrets.AZURE_STORAGE_CONTAINER }} \
       --file "reports/AKS Cluster Health.html" \
-      --name "$REPORT_NAME" \
-      --overwrite false
+      --name "$REPORT_NAME"
 
     echo "report_name=$REPORT_NAME" >> $GITHUB_OUTPUT
 
-####################################################################
-# GENERATE SAS URL
-####################################################################
 - name: Generate SAS URL
   id: sas
   run: |
-
     EXPIRY=$(date -u -d "3 days" '+%Y-%m-%dT%H:%MZ')
 
     TOKEN=$(az storage blob generate-sas \
@@ -110,19 +77,7 @@ steps:
       --expiry $EXPIRY \
       -o tsv)
 
-    FULL_URL="https://${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}.blob.core.windows.net/${{ secrets.AZURE_STORAGE_CONTAINER }}/${{ steps.upload.outputs.report_name }}?$TOKEN"
+    URL="https://${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}.blob.core.windows.net/${{ secrets.AZURE_STORAGE_CONTAINER }}/${{ steps.upload.outputs.report_name }}?$TOKEN"
 
-    echo "sasurl=$FULL_URL" >> $GITHUB_OUTPUT
-
-####################################################################
-# DISPLAY REPORT URL
-####################################################################
-- name: Show Report URL
-  run: |
-    echo "=========================================="
-    echo "AKS Health Report Uploaded Successfully"
-    echo "File: ${{ steps.upload.outputs.report_name }}"
-    echo "URL:"
-    echo "${{ steps.sas.outputs.sasurl }}"
-    echo "=========================================="
+    echo "Report URL: $URL"
 ```
