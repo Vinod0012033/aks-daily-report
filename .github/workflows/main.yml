@@ -1,7 +1,7 @@
 name: Multi-Subscription AKS Health Check
 
 on:
-workflow_dispatch:        # Allows manual run
+workflow_dispatch:        # Manual trigger
 schedule:
 - cron: "*/15 * * * *"  # Runs every 15 minutes
 
